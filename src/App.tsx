@@ -11,7 +11,13 @@ import {
   CheckCircle2, 
   Gift,
   UserPlus,
-  ChevronRight
+  ChevronRight,
+  Smile,
+  Globe,
+  X,
+  Heart,
+  Zap,
+  Star
 } from 'lucide-react';
 
 // Types
@@ -24,6 +30,15 @@ interface Player {
   ready: boolean;
   lastAnswerCorrect?: boolean;
   lastAnswerIndex?: number;
+  level?: number;
+  totalWins?: number;
+}
+
+interface GlobalRank {
+  name: string;
+  score: number;
+  avatar: string;
+  level: number;
 }
 
 interface Question {
@@ -62,6 +77,10 @@ export default function App() {
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [showTutorial, setShowTutorial] = useState(false);
   const [roomId, setRoomId] = useState('default');
+  const [emojis, setEmojis] = useState<{ id: string, playerId: string, emoji: string }[]>([]);
+  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
+  const [globalLeaderboard, setGlobalLeaderboard] = useState<GlobalRank[]>([]);
+  const [showGlobalLeaderboard, setShowGlobalLeaderboard] = useState(false);
 
   useEffect(() => {
     // Get roomId from URL if present
@@ -78,6 +97,18 @@ export default function App() {
 
     newSocket.on('joined', ({ playerId }: { playerId: string }) => {
       localStorage.setItem('quiz_playerId', playerId);
+    });
+
+    newSocket.on('globalLeaderboard', (data: GlobalRank[]) => {
+      setGlobalLeaderboard(data);
+    });
+
+    newSocket.on('emojiReceived', ({ playerId, emoji }: { playerId: string, emoji: string }) => {
+      const id = Math.random().toString(36).substring(7);
+      setEmojis(prev => [...prev, { id, playerId, emoji }]);
+      setTimeout(() => {
+        setEmojis(prev => prev.filter(e => e.id !== id));
+      }, 3000);
     });
 
     newSocket.on('stateUpdate', (state: GameState) => {
@@ -124,6 +155,10 @@ export default function App() {
 
   const handleReset = () => {
     socket?.emit('resetGame', roomId);
+  };
+
+  const sendEmoji = (emoji: string) => {
+    socket?.emit('sendEmoji', { roomId, emoji });
   };
 
   useEffect(() => {
@@ -198,6 +233,12 @@ export default function App() {
         
         <div className="flex items-center gap-2">
           <button 
+            onClick={() => setShowGlobalLeaderboard(true)}
+            className="p-2 bg-white/5 rounded-full hover:bg-white/10 transition-colors"
+          >
+            <Globe className="w-5 h-5 text-white/60" />
+          </button>
+          <button 
             onClick={() => setShowTutorial(true)}
             className="p-2 bg-white/5 rounded-full hover:bg-white/10 transition-colors"
           >
@@ -218,6 +259,7 @@ export default function App() {
               isHost={me?.isHost || false} 
               onStart={handleStart} 
               language={language}
+              onPlayerClick={setSelectedPlayer}
             />
           )}
 
@@ -231,6 +273,7 @@ export default function App() {
               selectedAnswer={selectedAnswer} 
               onSelect={handleSubmitAnswer} 
               language={language}
+              onPlayerClick={setSelectedPlayer}
             />
           ) : null}
 
@@ -240,6 +283,7 @@ export default function App() {
               isHost={me?.isHost || false} 
               onReset={handleReset} 
               language={language}
+              onPlayerClick={setSelectedPlayer}
             />
           )}
         </AnimatePresence>
@@ -253,12 +297,203 @@ export default function App() {
             setLanguage={setLanguage} 
           />
         )}
+        {selectedPlayer && (
+          <ProfileModal 
+            player={selectedPlayer} 
+            onClose={() => setSelectedPlayer(null)} 
+            language={language} 
+          />
+        )}
+        {showGlobalLeaderboard && (
+          <GlobalLeaderboardModal 
+            leaderboard={globalLeaderboard} 
+            onClose={() => setShowGlobalLeaderboard(false)} 
+            language={language} 
+          />
+        )}
       </AnimatePresence>
+
+      {/* Emoji Floating Layer */}
+      <div className="fixed inset-0 pointer-events-none z-[60]">
+        {emojis.map((e) => {
+          const player = gameState.players.find(p => p.id === e.playerId);
+          if (!player) return null;
+          return (
+            <EmojiBubble key={e.id} emoji={e.emoji} player={player} />
+          );
+        })}
+      </div>
+
+      {/* Emoji Picker (only in playing/waiting/result states) */}
+      {gameState.status !== 'starting' && (
+        <EmojiPicker onSelect={sendEmoji} />
+      )}
     </div>
   );
 }
 
-function Lobby({ gameState, isHost, onStart, language }: { gameState: GameState, isHost: boolean, onStart: () => void, language: Language }) {
+function EmojiBubble({ emoji, player }: { emoji: string, player: Player, key?: string }) {
+  return (
+    <motion.div
+      initial={{ y: 100, x: Math.random() * 100 - 50, opacity: 0, scale: 0.5 }}
+      animate={{ y: -200, opacity: [0, 1, 1, 0], scale: [0.5, 1.2, 1.2, 1] }}
+      transition={{ duration: 3, ease: "easeOut" }}
+      className="absolute bottom-20 left-1/2 flex flex-col items-center gap-1"
+    >
+      <div className="text-4xl">{emoji}</div>
+      <div className="bg-bg/80 backdrop-blur-md border border-white/10 px-2 py-0.5 rounded-full text-[8px] font-bold">
+        {player.name}
+      </div>
+    </motion.div>
+  );
+}
+
+function EmojiPicker({ onSelect }: { onSelect: (e: string) => void }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const emojis = ['🔥', '😂', '👏', '🤔', '😎', '🎉', '😱', '💯'];
+
+  return (
+    <div className="fixed bottom-6 right-6 z-[70]">
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.5, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.5, y: 20 }}
+            className="absolute bottom-16 right-0 bg-bg/90 backdrop-blur-xl border border-white/10 p-2 rounded-2xl grid grid-cols-4 gap-2 shadow-2xl"
+          >
+            {emojis.map(e => (
+              <button
+                key={e}
+                onClick={() => {
+                  onSelect(e);
+                  setIsOpen(false);
+                }}
+                className="w-10 h-10 flex items-center justify-center text-xl hover:bg-white/10 rounded-xl transition-colors"
+              >
+                {e}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-12 h-12 bg-neon-purple rounded-full flex items-center justify-center shadow-lg shadow-neon-purple/20 hover:scale-110 transition-transform"
+      >
+        <Smile className="w-6 h-6 text-white" />
+      </button>
+    </div>
+  );
+}
+
+function ProfileModal({ player, onClose, language }: { player: Player, onClose: () => void, language: Language }) {
+  const t = translations[language].social;
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-bg/90 backdrop-blur-sm"
+    >
+      <motion.div
+        initial={{ scale: 0.9, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        className="w-full max-w-sm bg-white/5 border border-white/10 rounded-[40px] p-8 space-y-6 relative overflow-hidden"
+      >
+        <button onClick={onClose} className="absolute top-6 right-6 p-2 hover:bg-white/5 rounded-full">
+          <X className="w-6 h-6 text-white/40" />
+        </button>
+
+        <div className="flex flex-col items-center text-center space-y-4">
+          <div className="relative">
+            <div className="absolute -inset-2 bg-neon-purple blur opacity-50 rounded-full"></div>
+            <img src={player.avatar} alt="" className="relative w-24 h-24 rounded-full border-4 border-neon-purple bg-bg" referrerPolicy="no-referrer" />
+            <div className="absolute -bottom-2 -right-2 bg-neon-yellow text-bg text-xs font-black px-2 py-1 rounded-lg">
+              LV.{player.level || 1}
+            </div>
+          </div>
+          <div>
+            <h3 className="text-2xl font-black italic uppercase">{player.name}</h3>
+            <p className="text-white/40 text-xs uppercase tracking-widest font-bold">{t.profile}</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-white/5 rounded-2xl p-4 border border-white/5 flex flex-col items-center">
+            <Zap className="w-5 h-5 text-neon-cyan mb-1" />
+            <div className="text-xl font-black">{player.totalWins || 0}</div>
+            <div className="text-[10px] text-white/40 uppercase font-bold">{t.totalWins}</div>
+          </div>
+          <div className="bg-white/5 rounded-2xl p-4 border border-white/5 flex flex-col items-center">
+            <Star className="w-5 h-5 text-neon-yellow mb-1" />
+            <div className="text-xl font-black">75%</div>
+            <div className="text-[10px] text-white/40 uppercase font-bold">{t.winRate}</div>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <button className="flex-1 py-4 bg-white/5 hover:bg-white/10 rounded-2xl font-bold text-sm transition-all flex items-center justify-center gap-2">
+            <Gift className="w-4 h-4" /> {t.sendGift}
+          </button>
+          <button className="flex-1 py-4 bg-neon-purple rounded-2xl font-black italic uppercase text-sm shadow-lg shadow-neon-purple/20 flex items-center justify-center gap-2">
+            <UserPlus className="w-4 h-4" /> {t.addFriend}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function GlobalLeaderboardModal({ leaderboard, onClose, language }: { leaderboard: GlobalRank[], onClose: () => void, language: Language }) {
+  const t = translations[language];
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-bg/90 backdrop-blur-sm"
+    >
+      <motion.div
+        initial={{ scale: 0.9, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        className="w-full max-w-md bg-white/5 border border-white/10 rounded-[40px] p-8 flex flex-col max-h-[80vh] relative overflow-hidden"
+      >
+        <button onClick={onClose} className="absolute top-6 right-6 p-2 hover:bg-white/5 rounded-full">
+          <X className="w-6 h-6 text-white/40" />
+        </button>
+
+        <div className="text-center space-y-2 mb-8">
+          <h3 className="text-2xl font-black italic uppercase neon-text-purple">{t.globalLeaderboard}</h3>
+          <p className="text-white/40 text-xs uppercase tracking-widest font-bold">Top Players Worldwide</p>
+        </div>
+
+        <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+          {leaderboard.map((rank, i) => (
+            <div key={i} className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <span className={`text-sm font-black w-6 ${i < 3 ? 'text-neon-yellow' : 'text-white/20'}`}>
+                  #{i + 1}
+                </span>
+                <img src={rank.avatar} alt="" className="w-10 h-10 rounded-full border-2 border-white/10" referrerPolicy="no-referrer" />
+                <div>
+                  <div className="font-bold text-sm">{rank.name}</div>
+                  <div className="text-[10px] text-white/40 uppercase font-black">LV.{rank.level}</div>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="font-black text-neon-cyan">{rank.score}</div>
+                <div className="text-[10px] text-white/40 uppercase font-black">Total Score</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function Lobby({ gameState, isHost, onStart, language, onPlayerClick }: { gameState: GameState, isHost: boolean, onStart: () => void, language: Language, onPlayerClick: (p: Player) => void }) {
   const t = translations[language];
   return (
     <motion.div 
@@ -278,8 +513,10 @@ function Lobby({ gameState, isHost, onStart, language }: { gameState: GameState,
             const player = gameState.players[i];
             return (
               <div key={i} className="flex flex-col items-center space-y-2">
-                <div className={`w-16 h-16 rounded-2xl border-2 flex items-center justify-center relative transition-all ${
-                  player ? 'border-neon-purple bg-neon-purple/10' : 'border-white/5 bg-white/5 border-dashed'
+                <div 
+                  onClick={() => player && onPlayerClick(player)}
+                  className={`w-16 h-16 rounded-2xl border-2 flex items-center justify-center relative transition-all cursor-pointer ${
+                  player ? 'border-neon-purple bg-neon-purple/10 hover:scale-105' : 'border-white/5 bg-white/5 border-dashed'
                 }`}>
                   {player ? (
                     <>
@@ -373,7 +610,7 @@ function Countdown({ timer, language, players }: { timer: number, language: Lang
   );
 }
 
-function Quiz({ gameState, selectedAnswer, onSelect, language }: { gameState: GameState, selectedAnswer: number | null, onSelect: (i: number) => void, language: Language }) {
+function Quiz({ gameState, selectedAnswer, onSelect, language, onPlayerClick }: { gameState: GameState, selectedAnswer: number | null, onSelect: (i: number) => void, language: Language, onPlayerClick: (p: Player) => void }) {
   const currentQuestion = gameState.questions[gameState.currentQuestionIndex];
   const timerPercentage = (gameState.timer / 10) * 100;
   const t = translations[language];
@@ -551,7 +788,13 @@ function Quiz({ gameState, selectedAnswer, onSelect, language }: { gameState: Ga
                 className="flex-shrink-0 flex items-center gap-2 bg-white/5 border border-white/10 rounded-full px-3 py-1"
               >
                 <span className="text-[10px] font-black text-white/30">{i + 1}</span>
-                <img src={p.avatar} alt="" className="w-5 h-5 rounded-full" referrerPolicy="no-referrer" />
+                <img 
+                  src={p.avatar} 
+                  alt="" 
+                  className="w-5 h-5 rounded-full cursor-pointer hover:ring-2 hover:ring-neon-purple transition-all" 
+                  referrerPolicy="no-referrer" 
+                  onClick={() => onPlayerClick(p)}
+                />
                 <span className="text-[10px] font-bold max-w-[60px] truncate">{p.name}</span>
                 <span className="text-[10px] font-black text-neon-yellow">{p.score}</span>
               </motion.div>
@@ -563,7 +806,7 @@ function Quiz({ gameState, selectedAnswer, onSelect, language }: { gameState: Ga
   );
 }
 
-function FinalResult({ gameState, isHost, onReset, language }: { gameState: GameState, isHost: boolean, onReset: () => void, language: Language }) {
+function FinalResult({ gameState, isHost, onReset, language, onPlayerClick }: { gameState: GameState, isHost: boolean, onReset: () => void, language: Language, onPlayerClick: (p: Player) => void }) {
   const sortedPlayers = [...gameState.players].sort((a, b) => b.score - a.score);
   const t = translations[language];
 
@@ -581,8 +824,8 @@ function FinalResult({ gameState, isHost, onReset, language }: { gameState: Game
       <div className="flex items-end justify-center gap-2 h-48 mb-8">
         {sortedPlayers[1] && (
           <div className="flex flex-col items-center space-y-2">
-            <div className="relative">
-              <img src={sortedPlayers[1].avatar} alt="" className="w-14 h-14 rounded-full border-2 border-white/20" referrerPolicy="no-referrer" />
+            <div className="relative cursor-pointer group" onClick={() => sortedPlayers[1] && onPlayerClick(sortedPlayers[1])}>
+              <img src={sortedPlayers[1].avatar} alt="" className="w-14 h-14 rounded-full border-2 border-white/20 group-hover:border-neon-purple transition-all" referrerPolicy="no-referrer" />
               <div className="absolute -bottom-2 -right-2 bg-white/20 text-white text-[10px] font-black w-6 h-6 rounded-full flex items-center justify-center">2</div>
             </div>
             <div className="w-20 bg-white/10 h-24 rounded-t-xl flex flex-col items-center justify-center p-2">
@@ -593,11 +836,11 @@ function FinalResult({ gameState, isHost, onReset, language }: { gameState: Game
         )}
         {sortedPlayers[0] && (
           <div className="flex flex-col items-center space-y-2">
-            <div className="relative">
+            <div className="relative cursor-pointer group" onClick={() => sortedPlayers[0] && onPlayerClick(sortedPlayers[0])}>
               <div className="absolute -top-6 left-1/2 -translate-x-1/2">
                 <Trophy className="w-8 h-8 text-neon-yellow animate-bounce" />
               </div>
-              <img src={sortedPlayers[0].avatar} alt="" className="w-20 h-20 rounded-full border-4 border-neon-yellow shadow-lg shadow-neon-yellow/20" referrerPolicy="no-referrer" />
+              <img src={sortedPlayers[0].avatar} alt="" className="w-20 h-20 rounded-full border-4 border-neon-yellow shadow-lg shadow-neon-yellow/20 group-hover:scale-105 transition-all" referrerPolicy="no-referrer" />
               <div className="absolute -bottom-2 -right-2 bg-neon-yellow text-bg text-xs font-black w-8 h-8 rounded-full flex items-center justify-center">1</div>
             </div>
             <div className="w-24 bg-neon-yellow/10 border-x border-t border-neon-yellow/30 h-32 rounded-t-2xl flex flex-col items-center justify-center p-2">
@@ -608,8 +851,8 @@ function FinalResult({ gameState, isHost, onReset, language }: { gameState: Game
         )}
         {sortedPlayers[2] && (
           <div className="flex flex-col items-center space-y-2">
-            <div className="relative">
-              <img src={sortedPlayers[2].avatar} alt="" className="w-12 h-12 rounded-full border-2 border-white/10" referrerPolicy="no-referrer" />
+            <div className="relative cursor-pointer group" onClick={() => sortedPlayers[2] && onPlayerClick(sortedPlayers[2])}>
+              <img src={sortedPlayers[2].avatar} alt="" className="w-12 h-12 rounded-full border-2 border-white/10 group-hover:border-neon-purple transition-all" referrerPolicy="no-referrer" />
               <div className="absolute -bottom-2 -right-2 bg-white/10 text-white/60 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center">3</div>
             </div>
             <div className="w-16 bg-white/5 h-20 rounded-t-xl flex flex-col items-center justify-center p-2">
@@ -623,9 +866,9 @@ function FinalResult({ gameState, isHost, onReset, language }: { gameState: Game
       <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
         {sortedPlayers.slice(3).map((p, i) => (
           <div key={p.id} className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 cursor-pointer group" onClick={() => onPlayerClick(p)}>
               <span className="text-xs font-black text-white/20 w-4">{i + 4}</span>
-              <img src={p.avatar} alt="" className="w-10 h-10 rounded-full" referrerPolicy="no-referrer" />
+              <img src={p.avatar} alt="" className="w-10 h-10 rounded-full group-hover:ring-2 group-hover:ring-neon-purple transition-all" referrerPolicy="no-referrer" />
               <div>
                 <div className="font-bold text-sm">{p.name}</div>
                 <div className="text-[10px] text-white/40 uppercase font-black">{t.ranked} {i + 4}</div>

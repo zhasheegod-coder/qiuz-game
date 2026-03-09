@@ -24,7 +24,18 @@ interface Player {
   ready: boolean;
   lastAnswerCorrect?: boolean;
   lastAnswerIndex?: number;
+  level?: number;
+  totalWins?: number;
 }
+
+// Mock Global Leaderboard Data
+const GLOBAL_LEADERBOARD = [
+  { name: "QuizMaster", score: 15420, avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=QuizMaster", level: 42 },
+  { name: "NeonKing", score: 12300, avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=NeonKing", level: 38 },
+  { name: "TriviaQueen", score: 11200, avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=TriviaQueen", level: 35 },
+  { name: "SmartyPants", score: 9800, avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=SmartyPants", level: 30 },
+  { name: "Brainiac", score: 8500, avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Brainiac", level: 28 },
+];
 
 interface Question {
   category: {
@@ -225,12 +236,20 @@ io.on('connection', (socket) => {
         score: 0,
         isHost,
         ready: false,
+        level: Math.floor(Math.random() * 10) + 1,
+        totalWins: Math.floor(Math.random() * 5),
       };
       room.players.push(player);
     }
     
     socket.emit('joined', { playerId: player.id });
+    socket.emit('globalLeaderboard', GLOBAL_LEADERBOARD);
     broadcastState(actualRoomId);
+  });
+
+  socket.on('sendEmoji', ({ roomId, emoji }: { roomId: string, emoji: string }) => {
+    const actualRoomId = roomId || 'default';
+    io.to(actualRoomId).emit('emojiReceived', { playerId: socket.id, emoji });
   });
 
   socket.on('startGame', (roomId: string) => {
